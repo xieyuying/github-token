@@ -1,6 +1,8 @@
 import { env } from "@github-token/env/server";
 import { drizzle } from "drizzle-orm/node-postgres";
 
-import * as schema from "./schema";
+import * as schema from "./schema/index";
 
 export const db = drizzle(env.DATABASE_URL, { schema });
+
+export * from "./schema/index";

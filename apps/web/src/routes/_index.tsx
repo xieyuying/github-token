@@ -1,60 +1,13 @@
 import { Button } from "@github-token/ui/components/button";
 import { Input } from "@github-token/ui/components/input";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link2, Mail, MapPin, Search, TrendingUp } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { toast } from "sonner";
 
-import { trpc } from "@/utils/trpc";
+import { queryClient, trpc } from "@/utils/trpc";
 
 import type { Route } from "./+types/_index";
-
-type SavedUser = {
-  id: string;
-  username: string;
-  handle: string;
-  name: string;
-  email: string;
-  location: string;
-  website: string;
-  bio: string;
-  avatar: string;
-  repos: number;
-  followers: number;
-  following: number;
-};
-
-const initialUsers: SavedUser[] = [
-  {
-    id: "alex-rivera",
-    username: "Alex Rivera",
-    handle: "@arivera_dev",
-    name: "Alex Rivera",
-    email: "alex@rivera.dev",
-    location: "San Francisco, CA",
-    website: "arivera.dev",
-    bio: "Full-stack engineer building the future of decentralized finance. Open source enthusiast and tech lead.",
-    avatar:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=240&q=80",
-    repos: 142,
-    followers: 2400,
-    following: 892,
-  },
-  {
-    id: "sarah-chen",
-    username: "Sarah Chen",
-    handle: "@schen_codes",
-    name: "Sarah Chen",
-    email: "sarah@chen.io",
-    location: "Toronto, Canada",
-    website: "sarahchen.design",
-    bio: "UI/UX Designer & Frontend Architect. Exploring the intersection of AI and design systems.",
-    avatar:
-      "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?auto=format&fit=crop&w=240&q=80",
-    repos: 84,
-    followers: 5800,
-    following: 1200,
-  },
-];
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -64,12 +17,28 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Home() {
-  const healthCheck = useQuery(trpc.healthCheck.queryOptions());
+  const usersQuery = useQuery(trpc.githubUsers.list.queryOptions());
   const [token, setToken] = useState("");
-  const [users, setUsers] = useState(initialUsers);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"latest" | "popular">("latest");
+
+  const saveProfileMutation = useMutation(
+    trpc.githubUsers.saveFromToken.mutationOptions({
+      onSuccess: async () => {
+        setToken("");
+        await queryClient.invalidateQueries(trpc.githubUsers.list.queryFilter());
+        toast.success("GitHub 用户信息已保存");
+      },
+    }),
+  );
+
+  const deleteProfileMutation = useMutation(
+    trpc.githubUsers.delete.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries(trpc.githubUsers.list.queryFilter());
+        toast.success("用户记录已删除");
+      },
+    }),
+  );
 
   function formatCompactNumber(value: number) {
     if (value >= 1000) {
@@ -86,58 +55,21 @@ export default function Home() {
       return;
     }
 
-    setIsSubmitting(true);
-
-    window.setTimeout(() => {
-      const normalizedToken = token.trim();
-      const suffix = normalizedToken.slice(-4) || "demo";
-
-      setUsers((currentUsers) => [
-        {
-          id: `profile-${Date.now()}`,
-          username: `Dev User ${suffix.toUpperCase()}`,
-          handle: `@dev_${suffix}`,
-          name: `Dev User ${suffix.toUpperCase()}`,
-          email: `dev.${suffix}@example.dev`,
-          location: "Remote",
-          website: `dev-${suffix}.site`,
-          bio: "Prototype profile generated from the provided token for local UI preview.",
-          avatar:
-            "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=240&q=80",
-          repos: 32,
-          followers: 860,
-          following: 214,
-        },
-        ...currentUsers,
-      ]);
-      setToken("");
-      setIsSubmitting(false);
-    }, 450);
+    saveProfileMutation.mutate({ token: token.trim() });
   }
 
-  function handleRefresh() {
-    setIsRefreshing(true);
-
-    window.setTimeout(() => {
-      setUsers((currentUsers) =>
-        currentUsers.map((user, index) => ({
-          ...user,
-          repos: user.repos + (index === 0 ? 1 : 0),
-          followers: user.followers + (index === 0 ? 18 : 0),
-        })),
-      );
-      setIsRefreshing(false);
-    }, 350);
+  async function handleRefresh() {
+    await usersQuery.refetch();
+    toast.success("列表已刷新");
   }
 
-  function handleDelete(id: string) {
-    setUsers((currentUsers) => currentUsers.filter((user) => user.id !== id));
+  function handleDelete(id: number) {
+    deleteProfileMutation.mutate({ id });
   }
 
+  const users = usersQuery.data ?? [];
   const displayedUsers =
-    activeTab === "latest"
-      ? users
-      : [...users].sort((a, b) => b.followers - a.followers);
+    activeTab === "latest" ? users : [...users].sort((a, b) => b.followers - a.followers);
 
   return (
     <main className="min-h-full bg-[#f4f2f1] text-[#1f2738]">
@@ -165,51 +97,44 @@ export default function Home() {
 
               <Button
                 className="h-14 w-full rounded-[14px] bg-[#ff5c08] text-xl font-semibold text-white shadow-[0_12px_22px_rgba(255,92,8,0.28)] hover:bg-[#f05400]"
-                disabled={!token.trim() || isSubmitting}
+                disabled={!token.trim() || saveProfileMutation.isPending}
                 type="submit"
               >
-                {isSubmitting ? "Fetching..." : "Fetch Profile  ->"}
+                {saveProfileMutation.isPending ? "输入中..." : "输入"}
               </Button>
             </form>
-
-            <p className="text-center text-sm text-[#8f9ab0]">
-              Tokens are used locally and never stored on our servers.
-            </p>
           </div>
         </section>
 
         <section className="space-y-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <h2 className="text-[2.1rem] font-semibold tracking-tight text-[#1e2435]">
-              Retrieved Profiles
+              github用户
             </h2>
 
-            <div className="inline-flex rounded-[14px] bg-[#e8ebf2] p-1">
-              <button
-                className={`rounded-[10px] px-4 py-2 text-sm font-semibold transition ${
-                  activeTab === "latest"
-                    ? "bg-white text-[#1e2435] shadow-[0_2px_6px_rgba(15,23,42,0.08)]"
-                    : "text-[#6a768d]"
-                }`}
-                onClick={() => setActiveTab("latest")}
+            <div className="flex items-center gap-3">
+              <Button
+                className="h-10 rounded-[12px] bg-[#1f2738] px-4 text-sm font-semibold text-white hover:bg-[#141b29]"
+                disabled={usersQuery.isFetching}
+                onClick={handleRefresh}
                 type="button"
               >
-                Latest
-              </button>
-              <button
-                className={`inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-sm font-semibold transition ${
-                  activeTab === "popular"
-                    ? "bg-white text-[#1e2435] shadow-[0_2px_6px_rgba(15,23,42,0.08)]"
-                    : "text-[#6a768d]"
-                }`}
-                onClick={() => setActiveTab("popular")}
-                type="button"
-              >
-                Popular
-                <TrendingUp className="size-3.5" />
-              </button>
+                {usersQuery.isFetching ? "刷新中..." : "刷新"}
+              </Button>
             </div>
           </div>
+
+          {usersQuery.isLoading ? (
+            <div className="rounded-[22px] border border-[#e8e2db] bg-white px-6 py-14 text-center text-base text-[#7b8598] shadow-[0_8px_18px_rgba(31,39,56,0.08)]">
+              Loading saved profiles...
+            </div>
+          ) : null}
+
+          {usersQuery.isError ? (
+            <div className="rounded-[22px] border border-[#f4c7b5] bg-[#fff7f3] px-6 py-5 text-sm text-[#c04c1b] shadow-[0_8px_18px_rgba(31,39,56,0.08)]">
+              读取已保存用户失败，请检查后端服务、数据库连接和接口配置。
+            </div>
+          ) : null}
 
           <div className="space-y-6">
             {displayedUsers.length > 0 ? (
@@ -222,22 +147,20 @@ export default function Home() {
                     <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                       <div className="flex gap-5">
                         <img
-                          alt={user.username}
+                          alt={user.login}
                           className="h-[92px] w-[92px] rounded-[18px] object-cover shadow-sm"
-                          src={user.avatar}
+                          src={user.avatarUrl || "https://avatars.githubusercontent.com/u/9919?s=200&v=4"}
                         />
 
                         <div className="space-y-2 pt-1">
                           <div>
                             <h3 className="text-[2rem] font-semibold leading-none text-[#1f2738]">
-                              {user.username}
+                              {user.name || user.login}
                             </h3>
-                            <p className="mt-2 text-lg font-medium text-[#ff6a1b]">
-                              {user.handle}
-                            </p>
+                            <p className="mt-2 text-lg font-medium text-[#ff6a1b]">@{user.login}</p>
                           </div>
                           <p className="max-w-[580px] text-[1.03rem] leading-7 text-[#68758f]">
-                            {user.bio}
+                            {user.bio || "This GitHub user has not added a public bio yet."}
                           </p>
                         </div>
                       </div>
@@ -245,13 +168,14 @@ export default function Home() {
                       <div className="flex items-start gap-3">
                         <Button
                           className="h-11 rounded-[14px] border border-[#ffd4c0] bg-white px-4 text-sm font-semibold text-[#ff6a1b] hover:bg-[#fff5ef]"
-                          onClick={() => window.open(`https://github.com/${user.handle.slice(1)}`)}
+                          onClick={() => window.open(`https://github.com/${user.login}`, "_blank")}
                           type="button"
                         >
                           View on GitHub
                         </Button>
                         <Button
                           className="h-11 rounded-[14px] bg-[#fff1eb] px-4 text-sm font-semibold text-[#ef5a2a] hover:bg-[#ffe5d9]"
+                          disabled={deleteProfileMutation.isPending}
                           onClick={() => handleDelete(user.id)}
                           type="button"
                         >
@@ -288,15 +212,15 @@ export default function Home() {
                     <div className="flex flex-col gap-3 text-[1.02rem] text-[#6c7890] md:flex-row md:flex-wrap md:items-center md:gap-7">
                       <div className="inline-flex items-center gap-2">
                         <MapPin className="size-4.5 text-[#6c7890]" />
-                        <span>{user.location}</span>
+                        <span>{user.location || "Location not public"}</span>
                       </div>
                       <div className="inline-flex items-center gap-2">
                         <Mail className="size-4.5 text-[#6c7890]" />
-                        <span>{user.email}</span>
+                        <span>{user.email || "Email not public"}</span>
                       </div>
                       <div className="inline-flex items-center gap-2">
                         <Link2 className="size-4.5 text-[#6c7890]" />
-                        <span>{user.website}</span>
+                        <span>{user.website || "No website"}</span>
                       </div>
                     </div>
                   </div>
@@ -304,7 +228,7 @@ export default function Home() {
               ))
             ) : (
               <div className="rounded-[22px] border border-[#e8e2db] bg-white px-6 py-14 text-center text-base text-[#7b8598] shadow-[0_8px_18px_rgba(31,39,56,0.08)]">
-                No profiles yet. Paste a token above to preview a retrieved profile.
+                No profiles yet. Paste a token above to retrieve and save a GitHub profile.
               </div>
             )}
           </div>
